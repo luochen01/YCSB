@@ -397,7 +397,7 @@ public final class Client {
       System.exit(-1);
     }
 
-    System.exit(0);
+    //System.exit(0);
   }
 
   private static List<ClientThread> initDb(String dbname, Properties props, int threadcount,

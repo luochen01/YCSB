@@ -86,7 +86,7 @@ public abstract class DB {
    * @param result A HashMap of field/value pairs for the result
    * @return The result of the operation.
    */
-  public abstract Status read(String table, String key, Set<String> fields, Map<String, ByteIterator> result);
+    public abstract Status read(String table, String key, Set<String> fields, Map<String, ByteIterator> result);
 
   /**
    * Perform a range scan for a set of records in the database. Each field/value pair from the result will be stored
