@@ -34,7 +34,7 @@ import java.util.*;
  * <UL>
  * <LI><b>fieldcount</b>: the number of fields in a record (default: 10)
  * <LI><b>fieldlength</b>: the size of each field (default: 100)
- * <LI><b>minfieldlength</b>: the minimum size of each field (default: 1)
+ * <LI><b>minfieldlength</b>: the minimum size of each field (default: 1)scanlengthdistribution
  * <LI><b>readallfields</b>: should reads read all fields (true) or just one (false) (default: true)
  * <LI><b>writeallfields</b>: should updates and read/modify/writes update all fields (true) or just
  * one (false) (default: false)
