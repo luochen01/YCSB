@@ -642,7 +642,7 @@ public class CoreWorkload extends Workload {
                 doTransactionRead(db);
                 break;
             case "UPDATE":
-                doTransactionUpdate(db);
+                doTransactionUpdate(db, threadstate);
                 break;
             case "INSERT":
                 doTransactionInsert(db);
@@ -792,9 +792,13 @@ public class CoreWorkload extends Workload {
         db.scan(table, startkeyname, len, fields, new Vector<HashMap<String, ByteIterator>>());
     }
 
-    public void doTransactionUpdate(DB db) {
+    public void doTransactionUpdate(DB db, Object state) {
+        ThreadState threadState = (ThreadState) state;
         // choose a random key
         long keynum = nextKeynum();
+        while (keynum % threadState.threadcount != threadState.threadid) {
+            keynum = nextKeynum();
+        }
 
         String keyname = buildKeyName(keynum);
 
@@ -873,5 +877,20 @@ public class CoreWorkload extends Workload {
             operationchooser.addValue(readmodifywriteproportion, "READMODIFYWRITE");
         }
         return operationchooser;
+    }
+
+    @Override
+    public Object initThread(Properties p, int mythreadid, int threadcount) throws WorkloadException {
+        return new ThreadState(threadcount, mythreadid);
+    }
+
+    private static class ThreadState {
+        final int threadcount;
+        final int threadid;
+
+        public ThreadState(int threadcount, int threadid) {
+            this.threadcount = threadcount;
+            this.threadid = threadid;
+        }
     }
 }
