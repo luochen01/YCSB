@@ -501,24 +501,17 @@ public class CoreWorkload extends Workload {
         skgenerator = new UniformLongGenerator(insertstart, insertstart + insertcount - 1);
     }
 
-    //  protected String buildKeyName(long keynum) {
-    //    if (!orderedinserts) {
-    //      keynum = Utils.hash(keynum);
-    //    }
-    //    String value = Long.toString(keynum);
-    //    int fill = zeropadding - value.length();
-    //    String prekey = "user";
-    //    for (int i = 0; i < fill; i++) {
-    //      prekey += '0';
-    //    }
-    //    return prekey + value;
-    //  }
     protected String buildKeyName(long keynum) {
         if (!orderedinserts) {
             keynum = Utils.hash(keynum);
         }
         String value = Long.toString(keynum);
-        return value;
+        int fill = zeropadding - value.length();
+        String prekey = "user";
+        for (int i = 0; i < fill; i++) {
+            prekey += '0';
+        }
+        return prekey + value;
     }
 
     /**
