@@ -789,9 +789,9 @@ public class CoreWorkload extends Workload {
         ThreadState threadState = (ThreadState) state;
         // choose a random key
         long keynum = nextKeynum();
-        while (keynum % threadState.threadcount != threadState.threadid) {
-            keynum = nextKeynum();
-        }
+        //        while (keynum % threadState.threadcount != threadState.threadid) {
+        //            keynum = nextKeynum();
+        //        }
 
         String keyname = buildKeyName(keynum);
 
