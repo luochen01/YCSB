@@ -1,11 +1,11 @@
 package com.yahoo.ycsb;
 
-import com.yahoo.ycsb.measurements.Measurements;
 import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
+
+import com.yahoo.ycsb.measurements.Measurements;
 
 /**
  * A thread for executing transactions or data inserts to the database.
@@ -19,13 +19,7 @@ public class ClientThread implements Runnable {
     private boolean dotransactions;
     private Workload workload;
     private int opcount;
-    private boolean enablehightarget;
     private double targetOpsPerMs;
-    private double hightargetOpsPerMs;
-    private long targetperiod; // in nano
-    private long hightargetperiod; // in nano
-    private long targetOpsPerPeriod;
-    private long hightargetOpsPerPeriod;
 
     private int opsdone;
     private int threadid;
@@ -33,11 +27,7 @@ public class ClientThread implements Runnable {
     private Object workloadstate;
     private Properties props;
     private long targetOpsTickNs;
-    private long hightargetOpsTickNs;
     private final Measurements measurements;
-
-    private boolean highMode = false;
-    private int numPeriods = 0;
 
     /**
      * Constructor.
@@ -58,8 +48,7 @@ public class ClientThread implements Runnable {
      *            The latch tracking the completion of all clients.
      */
     public ClientThread(DB db, boolean dotransactions, Workload workload, Properties props, int opcount,
-            boolean enablehightarget, double targetperthreadperms, double hightargetperthreadperms, double targetperiod,
-            double hightargetperiod, CountDownLatch completeLatch) {
+            double targetperthreadperms, CountDownLatch completeLatch) {
         this.db = db;
         this.dotransactions = dotransactions;
         this.workload = workload;
@@ -68,16 +57,6 @@ public class ClientThread implements Runnable {
         if (targetperthreadperms > 0) {
             this.targetOpsPerMs = targetperthreadperms;
             this.targetOpsTickNs = (long) (1000000 / targetOpsPerMs);
-
-            this.enablehightarget = enablehightarget;
-            this.hightargetOpsPerMs = hightargetperthreadperms;
-            this.hightargetOpsTickNs = (long) (1000000 / hightargetOpsPerMs);
-            this.targetperiod = TimeUnit.MILLISECONDS.toNanos((long) (targetperiod * 1000));
-            this.hightargetperiod = TimeUnit.MILLISECONDS.toNanos((long) (hightargetperiod * 1000));
-
-            this.targetOpsPerPeriod = (long) (targetperiod * 1000 * targetOpsPerMs);
-            this.hightargetOpsPerPeriod = (long) (hightargetperiod * 1000 * hightargetOpsPerMs);
-
         }
         this.props = props;
         measurements = Measurements.getMeasurements();
@@ -182,22 +161,7 @@ public class ClientThread implements Runnable {
         //throttle the operations
         if (targetOpsPerMs > 0) {
             // delay until next tick
-            long deadline = 0;
-            if (enablehightarget) {
-                long newOps = opsdone - (targetOpsPerPeriod + hightargetOpsPerPeriod) * numPeriods;
-                if (newOps == targetOpsPerPeriod + hightargetOpsPerPeriod) {
-                    numPeriods++;
-                    deadline = startTimeNanos + numPeriods * (targetperiod + hightargetperiod);
-                } else if (newOps < targetOpsPerPeriod) {
-                    deadline =
-                            startTimeNanos + numPeriods * (targetperiod + hightargetperiod) + newOps * targetOpsTickNs;
-                } else {
-                    deadline = startTimeNanos + numPeriods * (targetperiod + hightargetperiod) + targetperiod
-                            + (newOps - targetOpsPerPeriod) * hightargetOpsTickNs;
-                }
-            } else {
-                deadline = startTimeNanos + opsdone * targetOpsTickNs;
-            }
+            long deadline = startTimeNanos + opsdone * targetOpsTickNs;
             sleepUntil(deadline);
             measurements.setIntendedStartTimeNs(deadline);
         }

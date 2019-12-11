@@ -135,12 +135,6 @@ public final class Client {
      */
     public static final String TARGET_PROPERTY = "target";
 
-    public static final String HIGH_TARGET_PROPERTY = "hightarget";
-
-    public static final String TARGET_PERIOD_PROPERTY = "targetperiod";
-
-    public static final String HIGH_TARGET_PERIOD_PROPERTY = "hightargetperiod";
-
     /**
      * The maximum amount of time (in seconds) for which the benchmark will be run.
      */
@@ -259,14 +253,14 @@ public final class Client {
                 exporter.write("TOTAL_GCS_" + entry.getKey(), "Count", entry.getValue()[0]);
                 exporter.write("TOTAL_GC_TIME_" + entry.getKey(), "Time(ms)", entry.getValue()[1]);
                 exporter.write("TOTAL_GC_TIME_%_" + entry.getKey(), "Time(%)",
-                        ((double) entry.getValue()[1] / runtime) * (double) 100);
+                        ((double) entry.getValue()[1] / runtime) * 100);
                 totalGCCount += entry.getValue()[0];
                 totalGCTime += entry.getValue()[1];
             }
             exporter.write("TOTAL_GCs", "Count", totalGCCount);
 
             exporter.write("TOTAL_GC_TIME", "Time(ms)", totalGCTime);
-            exporter.write("TOTAL_GC_TIME_%", "Time(%)", ((double) totalGCTime / runtime) * (double) 100);
+            exporter.write("TOTAL_GC_TIME_%", "Time(%)", ((double) totalGCTime / runtime) * 100);
             if (statusthread != null && statusthread.trackJVMStats()) {
                 exporter.write("MAX_MEM_USED", "MBs", statusthread.getMaxUsedMem());
                 exporter.write("MIN_MEM_USED", "MBs", statusthread.getMinUsedMem());
@@ -297,22 +291,12 @@ public final class Client {
         int threadcount = Integer.parseInt(props.getProperty(THREAD_COUNT_PROPERTY, "1"));
         String dbname = props.getProperty(DB_PROPERTY, "com.yahoo.ycsb.BasicDB");
         double target = Double.parseDouble(props.getProperty(TARGET_PROPERTY, "0"));
-        double highTarget = Double.parseDouble(props.getProperty(HIGH_TARGET_PROPERTY, "0"));
-        double targetPeriod = Double.parseDouble(props.getProperty(TARGET_PERIOD_PROPERTY, "0"));
-        double highTargetPeriod = Double.parseDouble(props.getProperty(HIGH_TARGET_PERIOD_PROPERTY, "0"));
 
         //compute the target throughput
         double targetperthreadperms = -1;
         if (target > 0 && props.containsKey(TARGET_PROPERTY)) {
-            double targetperthread = ((double) target) / ((double) threadcount);
+            double targetperthread = (target) / (threadcount);
             targetperthreadperms = targetperthread / 1000.0;
-        }
-
-        double hightargetperthreadperms = -1;
-        boolean enableHighTarget = highTarget > 0 && props.containsKey(HIGH_TARGET_PROPERTY);
-        if (enableHighTarget) {
-            double hightargetperthread = ((double) highTarget) / ((double) threadcount);
-            hightargetperthreadperms = hightargetperthread / 1000.0;
         }
 
         Thread warningthread = setupWarningThread();
@@ -329,8 +313,8 @@ public final class Client {
         System.err.println("Starting test.");
         final CountDownLatch completeLatch = new CountDownLatch(threadcount);
 
-        final List<ClientThread> clients = initDb(dbname, props, threadcount, enableHighTarget, targetperthreadperms,
-                hightargetperthreadperms, targetPeriod, highTargetPeriod, workload, tracer, completeLatch);
+        final List<ClientThread> clients =
+                initDb(dbname, props, threadcount, targetperthreadperms, workload, tracer, completeLatch);
 
         if (status) {
             boolean standardstatus = false;
@@ -421,9 +405,8 @@ public final class Client {
         //System.exit(0);
     }
 
-    private static List<ClientThread> initDb(String dbname, Properties props, int threadcount, boolean enablehightarget,
-            double targetperthreadperms, double hightargetperthreadperms, double targetperiod, double hightargetperiod,
-            Workload workload, Tracer tracer, CountDownLatch completeLatch) {
+    private static List<ClientThread> initDb(String dbname, Properties props, int threadcount,
+            double targetperthreadperms, Workload workload, Tracer tracer, CountDownLatch completeLatch) {
         boolean initFailed = false;
         boolean dotransactions = Boolean.valueOf(props.getProperty(DO_TRANSACTIONS_PROPERTY, String.valueOf(true)));
 
@@ -457,8 +440,8 @@ public final class Client {
                     ++threadopcount;
                 }
 
-                ClientThread t = new ClientThread(db, dotransactions, workload, props, threadopcount, enablehightarget,
-                        targetperthreadperms, hightargetperthreadperms, targetperiod, hightargetperiod, completeLatch);
+                ClientThread t = new ClientThread(db, dotransactions, workload, props, threadopcount,
+                        targetperthreadperms, completeLatch);
                 t.setThreadId(threadid);
                 t.setThreadCount(threadcount);
                 clients.add(t);
@@ -580,36 +563,6 @@ public final class Client {
                 }
                 double ttarget = Double.parseDouble(args[argindex]);
                 props.setProperty(TARGET_PROPERTY, String.valueOf(ttarget));
-                argindex++;
-            } else if (args[argindex].compareTo("-hightarget") == 0) {
-                argindex++;
-                if (argindex >= args.length) {
-                    usageMessage();
-                    System.out.println("Missing argument value for -hightarget.");
-                    System.exit(0);
-                }
-                double httarget = Double.parseDouble(args[argindex]);
-                props.setProperty(HIGH_TARGET_PROPERTY, String.valueOf(httarget));
-                argindex++;
-            } else if (args[argindex].compareTo("-targetperiod") == 0) {
-                argindex++;
-                if (argindex >= args.length) {
-                    usageMessage();
-                    System.out.println("Missing argument value for -targetperiod.");
-                    System.exit(0);
-                }
-                double targetperiod = Double.parseDouble(args[argindex]);
-                props.setProperty(TARGET_PERIOD_PROPERTY, String.valueOf(targetperiod));
-                argindex++;
-            } else if (args[argindex].compareTo("-hightargetperiod") == 0) {
-                argindex++;
-                if (argindex >= args.length) {
-                    usageMessage();
-                    System.out.println("Missing argument value for -hightargetperiod.");
-                    System.exit(0);
-                }
-                double targetperiod = Double.parseDouble(args[argindex]);
-                props.setProperty(HIGH_TARGET_PERIOD_PROPERTY, String.valueOf(targetperiod));
                 argindex++;
             } else if (args[argindex].compareTo("-load") == 0) {
                 props.setProperty(DO_TRANSACTIONS_PROPERTY, String.valueOf(false));

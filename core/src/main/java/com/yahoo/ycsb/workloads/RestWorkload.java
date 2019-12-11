@@ -17,12 +17,6 @@
 
 package com.yahoo.ycsb.workloads;
 
-import com.yahoo.ycsb.ByteIterator;
-import com.yahoo.ycsb.DB;
-import com.yahoo.ycsb.RandomByteIterator;
-import com.yahoo.ycsb.WorkloadException;
-import com.yahoo.ycsb.generator.*;
-
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
@@ -30,8 +24,16 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
+import com.yahoo.ycsb.ByteIterator;
+import com.yahoo.ycsb.DB;
+import com.yahoo.ycsb.RandomByteIterator;
+import com.yahoo.ycsb.WorkloadException;
+import com.yahoo.ycsb.generator.DiscreteGenerator;
+import com.yahoo.ycsb.generator.ExponentialGenerator;
+import com.yahoo.ycsb.generator.HotspotIntegerGenerator;
+import com.yahoo.ycsb.generator.NumberGenerator;
 import com.yahoo.ycsb.generator.UniformLongGenerator;
-import com.yahoo.ycsb.workloads.TimeSeriesWorkload.ThreadState;
+import com.yahoo.ycsb.generator.ZipfianGenerator;
 
 /**
  * Typical RESTFul services benchmarking scenario. Represents a set of client
@@ -198,7 +200,7 @@ public class RestWorkload extends CoreWorkload {
     }
 
     protected static NumberGenerator getFieldLengthGenerator(Properties p) throws WorkloadException {
-        // Re-using CoreWorkload method. 
+        // Re-using CoreWorkload method.
         NumberGenerator fieldLengthGenerator = CoreWorkload.getFieldLengthGenerator(p);
         String fieldlengthdistribution =
                 p.getProperty(FIELD_LENGTH_DISTRIBUTION_PROPERTY, FIELD_LENGTH_DISTRIBUTION_PROPERTY_DEFAULT);
@@ -254,16 +256,16 @@ public class RestWorkload extends CoreWorkload {
 
         switch (operation) {
             case "UPDATE":
-                doTransactionUpdate(db, threadstate);
+                doTransactionUpdate(db, 0, threadstate);
                 break;
             case "INSERT":
-                doTransactionInsert(db);
+                doTransactionInsert(db, 0);
                 break;
             case "DELETE":
                 doTransactionDelete(db);
                 break;
             default:
-                doTransactionRead(db);
+                doTransactionRead(db, 0);
         }
         return true;
     }
@@ -284,13 +286,13 @@ public class RestWorkload extends CoreWorkload {
     }
 
     @Override
-    public void doTransactionRead(DB db) {
+    public void doTransactionRead(DB db, int table) {
         HashMap<String, ByteIterator> result = new HashMap<String, ByteIterator>();
         db.read(null, getNextURL(1), null, result);
     }
 
     @Override
-    public void doTransactionInsert(DB db) {
+    public void doTransactionInsert(DB db, int table) {
         HashMap<String, ByteIterator> value = new HashMap<String, ByteIterator>();
         // Create random bytes of insert data with a specific size.
         value.put("data", new RandomByteIterator(fieldlengthgenerator.nextValue().longValue()));
@@ -302,7 +304,7 @@ public class RestWorkload extends CoreWorkload {
     }
 
     @Override
-    public void doTransactionUpdate(DB db, Object state) {
+    public void doTransactionUpdate(DB db, int table, Object state) {
         HashMap<String, ByteIterator> value = new HashMap<String, ByteIterator>();
         // Create random bytes of update data with a specific size.
         value.put("data", new RandomByteIterator(fieldlengthgenerator.nextValue().longValue()));

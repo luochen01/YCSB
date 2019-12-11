@@ -17,13 +17,37 @@
 
 package com.yahoo.ycsb.workloads;
 
-import com.yahoo.ycsb.*;
-import com.yahoo.ycsb.generator.*;
-import com.yahoo.ycsb.generator.UniformLongGenerator;
-import com.yahoo.ycsb.measurements.Measurements;
-
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Properties;
+import java.util.Vector;
+
+import com.yahoo.ycsb.ByteIterator;
+import com.yahoo.ycsb.Client;
+import com.yahoo.ycsb.DB;
+import com.yahoo.ycsb.RandomByteIterator;
+import com.yahoo.ycsb.Status;
+import com.yahoo.ycsb.StringByteIterator;
+import com.yahoo.ycsb.Utils;
+import com.yahoo.ycsb.Workload;
+import com.yahoo.ycsb.WorkloadException;
+import com.yahoo.ycsb.generator.AcknowledgedCounterGenerator;
+import com.yahoo.ycsb.generator.ConstantIntegerGenerator;
+import com.yahoo.ycsb.generator.CounterGenerator;
+import com.yahoo.ycsb.generator.DiscreteGenerator;
+import com.yahoo.ycsb.generator.ExponentialGenerator;
+import com.yahoo.ycsb.generator.HistogramGenerator;
+import com.yahoo.ycsb.generator.HotspotIntegerGenerator;
+import com.yahoo.ycsb.generator.NumberGenerator;
+import com.yahoo.ycsb.generator.ScrambledZipfianGenerator;
+import com.yahoo.ycsb.generator.SequentialGenerator;
+import com.yahoo.ycsb.generator.SkewedLatestGenerator;
+import com.yahoo.ycsb.generator.UniformLongGenerator;
+import com.yahoo.ycsb.generator.ZipfianGenerator;
+import com.yahoo.ycsb.measurements.Measurements;
 
 /**
  * The core benchmark scenario. Represents a set of clients doing simple CRUD operations. The
@@ -74,9 +98,7 @@ public class CoreWorkload extends Workload {
     /**
      * The default name of the database table to run queries against.
      */
-    public static final String TABLENAME_PROPERTY_DEFAULT = "usertable";
-
-    protected String table;
+    public static final String TABLENAME_PROPERTY_DEFAULT = "ds";
 
     /**
      * The name of the property for the number of fields in a record.
@@ -87,6 +109,8 @@ public class CoreWorkload extends Workload {
      * Default number of fields in a record.
      */
     public static final String FIELD_COUNT_PROPERTY_DEFAULT = "10";
+
+    private String tablePrefix;
 
     private List<String> fieldnames;
 
@@ -331,6 +355,18 @@ public class CoreWorkload extends Workload {
     public static final String INSERTION_RETRY_INTERVAL_DEFAULT = "3";
 
     /**
+     * On average, how long to wait between the retries, in seconds.
+     */
+    public static final String TABLE_COUNT_PROPERTY = "tablecount";
+    public static final String TABLE_COUNT_PROPERTY_DEFAULT = "1";
+
+    public static final String TABLE_OPERATION_PORTION = "table.operation.portion";
+    public static final String TABLE_OPERATION_PORTION_DEFAULT = "1";
+
+    public static final String TABLE_RECORD_PORTION = "table.record.portion";
+    public static final String TABLE_RECORD_PORTION_DEFAULT = "1";
+
+    /**
      * Field name prefix.
      */
     public static final String FIELD_NAME_PREFIX = "fieldnameprefix";
@@ -340,18 +376,22 @@ public class CoreWorkload extends Workload {
      */
     public static final String FIELD_NAME_PREFIX_DEFAULT = "field";
 
-    protected NumberGenerator keysequence;
-    protected DiscreteGenerator operationchooser;
-    protected NumberGenerator keychooser;
+    protected NumberGenerator[] keysequence;
+    protected DiscreteGenerator<String> operationchooser;
+    protected DiscreteGenerator<Integer> tablechooser;
+    protected NumberGenerator[] keychooser;
     protected NumberGenerator fieldchooser;
-    protected AcknowledgedCounterGenerator transactioninsertkeysequence;
+    protected AcknowledgedCounterGenerator[] transactioninsertkeysequence;
     protected NumberGenerator scanlength;
     protected boolean orderedinserts;
     protected long fieldcount;
+    protected int tablecount;
     protected long recordcount;
+    protected long[] tablerecordcount;
     protected int zeropadding;
     protected int insertionRetryLimit;
     protected int insertionRetryInterval;
+    protected String[] tablenames;
 
     protected NumberGenerator skgenerator;
 
@@ -390,7 +430,7 @@ public class CoreWorkload extends Workload {
      */
     @Override
     public void init(Properties p) throws WorkloadException {
-        table = p.getProperty(TABLENAME_PROPERTY, TABLENAME_PROPERTY_DEFAULT);
+        tablePrefix = p.getProperty(TABLENAME_PROPERTY, TABLENAME_PROPERTY_DEFAULT);
 
         fieldcount = Long.parseLong(p.getProperty(FIELD_COUNT_PROPERTY, FIELD_COUNT_PROPERTY_DEFAULT));
         final String fieldnameprefix = p.getProperty(FIELD_NAME_PREFIX, FIELD_NAME_PREFIX_DEFAULT);
@@ -400,10 +440,21 @@ public class CoreWorkload extends Workload {
         }
         fieldlengthgenerator = CoreWorkload.getFieldLengthGenerator(p);
 
+        tablecount = Integer.parseInt(p.getProperty(TABLE_COUNT_PROPERTY, TABLE_COUNT_PROPERTY_DEFAULT));
         recordcount = Long.parseLong(p.getProperty(Client.RECORD_COUNT_PROPERTY, Client.DEFAULT_RECORD_COUNT));
-        if (recordcount == 0) {
-            recordcount = Integer.MAX_VALUE;
+
+        tablerecordcount = new long[tablecount];
+        String[] strs = p.getProperty(TABLE_RECORD_PORTION).split(",");
+        if (tablecount != strs.length) {
+            System.err.println("Illegal value of " + TABLE_RECORD_PORTION + ". Expecting " + tablecount + " tables.");
+            System.exit(-1);
         }
+        tablenames = new String[tablecount];
+        for (int i = 0; i < tablecount; i++) {
+            tablerecordcount[i] = (long) (Double.valueOf(strs[i]) * recordcount);
+            tablenames[i] = tablePrefix + i;
+        }
+
         String requestdistrib = p.getProperty(REQUEST_DISTRIBUTION_PROPERTY, REQUEST_DISTRIBUTION_PROPERTY_DEFAULT);
         int minscanlength = Integer.parseInt(p.getProperty(MIN_SCAN_LENGTH_PROPERTY, MIN_SCAN_LENGTH_PROPERTY_DEFAULT));
         int maxscanlength = Integer.parseInt(p.getProperty(MAX_SCAN_LENGTH_PROPERTY, MAX_SCAN_LENGTH_PROPERTY_DEFAULT));
@@ -434,6 +485,7 @@ public class CoreWorkload extends Workload {
             System.err.println("Must have constant field size to check data integrity.");
             System.exit(-1);
         }
+        keychooser = new NumberGenerator[tablecount];
 
         if (p.getProperty(INSERT_ORDER_PROPERTY, INSERT_ORDER_PROPERTY_DEFAULT).compareTo("hashed") == 0) {
             orderedinserts = false;
@@ -442,19 +494,33 @@ public class CoreWorkload extends Workload {
                     ExponentialGenerator.EXPONENTIAL_PERCENTILE_DEFAULT));
             double frac = Double.parseDouble(p.getProperty(ExponentialGenerator.EXPONENTIAL_FRAC_PROPERTY,
                     ExponentialGenerator.EXPONENTIAL_FRAC_DEFAULT));
-            keychooser = new ExponentialGenerator(percentile, recordcount * frac);
+            for (int i = 0; i < tablecount; i++) {
+                keychooser[i] = new ExponentialGenerator(percentile, tablerecordcount[i] * frac);
+            }
         } else {
             orderedinserts = true;
         }
 
-        keysequence = new CounterGenerator(insertstart);
+        keysequence = new NumberGenerator[tablecount];
+        for (int i = 0; i < tablecount; i++) {
+            keysequence[i] = new CounterGenerator(insertstart);
+        }
         operationchooser = createOperationGenerator(p);
+        tablechooser = createTableGenerator(p);
 
-        transactioninsertkeysequence = new AcknowledgedCounterGenerator(recordcount);
+        transactioninsertkeysequence = new AcknowledgedCounterGenerator[tablecount];
+        for (int i = 0; i < tablecount; i++) {
+            transactioninsertkeysequence[i] = new AcknowledgedCounterGenerator(tablerecordcount[i]);
+        }
+
         if (requestdistrib.compareTo("uniform") == 0) {
-            keychooser = new UniformLongGenerator(insertstart, insertstart + insertcount - 1);
+            for (int i = 0; i < tablecount; i++) {
+                keychooser[i] = new UniformLongGenerator(insertstart, insertstart + tablerecordcount[i] - 1);
+            }
         } else if (requestdistrib.compareTo("sequential") == 0) {
-            keychooser = new SequentialGenerator(insertstart, insertstart + insertcount - 1);
+            for (int i = 0; i < tablecount; i++) {
+                keychooser[i] = new SequentialGenerator(insertstart, insertstart + tablerecordcount[i] - 1);
+            }
         } else if (requestdistrib.compareTo("zipfian") == 0) {
             // it does this by generating a random "next key" in part by taking the modulus over the
             // number of keys.
@@ -465,21 +531,28 @@ public class CoreWorkload extends Workload {
             // plus the number of predicted keys as the total keyspace. then, if the generator picks a key
             // that hasn't been inserted yet, will just ignore it and pick another key. this way, the size of
             // the keyspace doesn't change from the perspective of the scrambled zipfian generator
-            final double insertproportion =
-                    Double.parseDouble(p.getProperty(INSERT_PROPORTION_PROPERTY, INSERT_PROPORTION_PROPERTY_DEFAULT));
-            int opcount = Integer.parseInt(p.getProperty(Client.OPERATION_COUNT_PROPERTY));
-            int expectednewkeys = (int) ((opcount) * insertproportion * 2.0); // 2 is fudge factor
+            for (int i = 0; i < tablecount; i++) {
+                final double insertproportion = Double
+                        .parseDouble(p.getProperty(INSERT_PROPORTION_PROPERTY, INSERT_PROPORTION_PROPERTY_DEFAULT));
+                int opcount = Integer.parseInt(p.getProperty(Client.OPERATION_COUNT_PROPERTY));
+                int expectednewkeys = (int) ((opcount) * insertproportion * 2.0); // 2 is fudge factor
 
-            keychooser = new ScrambledZipfianGenerator(insertstart, insertstart + insertcount + expectednewkeys);
+                keychooser[i] =
+                        new ScrambledZipfianGenerator(insertstart, insertstart + tablerecordcount[i] + expectednewkeys);
+            }
         } else if (requestdistrib.compareTo("latest") == 0) {
-            keychooser = new SkewedLatestGenerator(transactioninsertkeysequence);
+            for (int i = 0; i < tablecount; i++) {
+                keychooser[i] = new SkewedLatestGenerator(transactioninsertkeysequence[i]);
+            }
         } else if (requestdistrib.equals("hotspot")) {
             double hotsetfraction =
                     Double.parseDouble(p.getProperty(HOTSPOT_DATA_FRACTION, HOTSPOT_DATA_FRACTION_DEFAULT));
             double hotopnfraction =
                     Double.parseDouble(p.getProperty(HOTSPOT_OPN_FRACTION, HOTSPOT_OPN_FRACTION_DEFAULT));
-            keychooser = new HotspotIntegerGenerator(insertstart, insertstart + insertcount - 1, hotsetfraction,
-                    hotopnfraction);
+            for (int i = 0; i < tablecount; i++) {
+                keychooser[i] = new HotspotIntegerGenerator(insertstart, insertstart + tablerecordcount[i] - 1,
+                        hotsetfraction, hotopnfraction);
+            }
         } else {
             throw new WorkloadException("Unknown request distribution \"" + requestdistrib + "\"");
         }
@@ -574,6 +647,10 @@ public class CoreWorkload extends Workload {
         return sb.toString();
     }
 
+    private long tablecountsum = -1;
+    private long insertcount = 0;
+    private int currentTable = -1;
+
     /**
      * Do one insert operation. Because it will be called concurrently from multiple client threads,
      * this function must be thread safe. However, avoid synchronized, or the threads will block waiting
@@ -582,14 +659,18 @@ public class CoreWorkload extends Workload {
      */
     @Override
     public boolean doInsert(DB db, Object threadstate) {
-        long keynum = keysequence.nextValue().longValue();
-        String dbkey = buildKeyName(keynum);
-        HashMap<String, ByteIterator> values = buildValues(dbkey);
-
+        if (currentTable < 0 || (insertcount > tablecountsum && currentTable + 1 < tablecount)) {
+            currentTable++;
+            tablecountsum += tablerecordcount[currentTable];
+        }
+        insertcount++;
         Status status;
         int numOfRetries = 0;
+        long keynum = keysequence[currentTable].nextValue().longValue();
+        String dbkey = buildKeyName(keynum);
+        HashMap<String, ByteIterator> values = buildValues(dbkey);
         do {
-            status = db.insert(table, dbkey, values);
+            status = db.insert(tablenames[currentTable], dbkey, values);
             if (null != status && status.isOk()) {
                 break;
             }
@@ -630,21 +711,22 @@ public class CoreWorkload extends Workload {
             return false;
         }
 
+        int table = tablechooser.nextValue();
         switch (operation) {
             case "READ":
-                doTransactionRead(db);
+                doTransactionRead(db, table);
                 break;
             case "UPDATE":
-                doTransactionUpdate(db, threadstate);
+                doTransactionUpdate(db, table, threadstate);
                 break;
             case "INSERT":
-                doTransactionInsert(db);
+                doTransactionInsert(db, table);
                 break;
             case "SCAN":
-                doTransactionScan(db);
+                doTransactionScan(db, table);
                 break;
             default:
-                doTransactionReadModifyWrite(db);
+                doTransactionReadModifyWrite(db, table);
         }
 
         return true;
@@ -676,23 +758,23 @@ public class CoreWorkload extends Workload {
         //        measurements.reportStatus("VERIFY", verifyStatus);
     }
 
-    long nextKeynum() {
+    long nextKeynum(int table) {
         long keynum;
-        if (keychooser instanceof ExponentialGenerator) {
+        if (keychooser[table] instanceof ExponentialGenerator) {
             do {
-                keynum = transactioninsertkeysequence.lastValue() - keychooser.nextValue().intValue();
+                keynum = transactioninsertkeysequence[table].lastValue() - keychooser[table].nextValue().intValue();
             } while (keynum < 0);
         } else {
             do {
-                keynum = keychooser.nextValue().intValue();
-            } while (keynum > transactioninsertkeysequence.lastValue());
+                keynum = keychooser[table].nextValue().intValue();
+            } while (keynum > transactioninsertkeysequence[table].lastValue());
         }
         return keynum;
     }
 
-    public void doTransactionRead(DB db) {
+    public void doTransactionRead(DB db, int table) {
         // choose a random key
-        long keynum = nextKeynum();
+        long keynum = nextKeynum(table);
 
         String keyname = buildKeyName(keynum);
 
@@ -710,16 +792,16 @@ public class CoreWorkload extends Workload {
         }
 
         HashMap<String, ByteIterator> cells = new HashMap<String, ByteIterator>();
-        db.read(table, keyname, fields, cells);
+        db.read(tablenames[table], keyname, fields, cells);
 
         if (dataintegrity) {
             verifyRow(keyname, cells);
         }
     }
 
-    public void doTransactionReadModifyWrite(DB db) {
+    public void doTransactionReadModifyWrite(DB db, int table) {
         // choose a random key
-        long keynum = nextKeynum();
+        long keynum = nextKeynum(table);
 
         String keyname = buildKeyName(keynum);
 
@@ -749,9 +831,9 @@ public class CoreWorkload extends Workload {
 
         long ist = measurements.getIntendedtartTimeNs();
         long st = System.nanoTime();
-        db.read(table, keyname, fields, cells);
+        db.read(tablenames[table], keyname, fields, cells);
 
-        db.update(table, keyname, values);
+        db.update(tablenames[table], keyname, values);
 
         long en = System.nanoTime();
 
@@ -763,9 +845,9 @@ public class CoreWorkload extends Workload {
         measurements.measureIntended("READ-MODIFY-WRITE", (int) ((en - ist) / 1000));
     }
 
-    public void doTransactionScan(DB db) {
+    public void doTransactionScan(DB db, int table) {
         // choose a random key
-        long keynum = nextKeynum();
+        long keynum = nextKeynum(table);
 
         String startkeyname = buildKeyName(keynum);
 
@@ -782,16 +864,12 @@ public class CoreWorkload extends Workload {
             fields.add(fieldname);
         }
 
-        db.scan(table, startkeyname, len, fields, new Vector<HashMap<String, ByteIterator>>());
+        db.scan(tablenames[table], startkeyname, len, fields, new Vector<HashMap<String, ByteIterator>>());
     }
 
-    public void doTransactionUpdate(DB db, Object state) {
-        ThreadState threadState = (ThreadState) state;
+    public void doTransactionUpdate(DB db, int table, Object state) {
         // choose a random key
-        long keynum = nextKeynum();
-        //        while (keynum % threadState.threadcount != threadState.threadid) {
-        //            keynum = nextKeynum();
-        //        }
+        long keynum = nextKeynum(table);
 
         String keyname = buildKeyName(keynum);
 
@@ -805,20 +883,20 @@ public class CoreWorkload extends Workload {
             values = buildSingleValue(keyname);
         }
 
-        db.update(table, keyname, values);
+        db.update(tablenames[table], keyname, values);
     }
 
-    public void doTransactionInsert(DB db) {
+    public void doTransactionInsert(DB db, int table) {
         // choose the next key
-        long keynum = transactioninsertkeysequence.nextValue();
+        long keynum = transactioninsertkeysequence[table].nextValue();
 
         try {
             String dbkey = buildKeyName(keynum);
 
             HashMap<String, ByteIterator> values = buildValues(dbkey);
-            db.insert(table, dbkey, values);
+            db.insert(tablenames[table], dbkey, values);
         } finally {
-            transactioninsertkeysequence.acknowledge(keynum);
+            transactioninsertkeysequence[table].acknowledge(keynum);
         }
     }
 
@@ -834,7 +912,7 @@ public class CoreWorkload extends Workload {
      * @throws IllegalArgumentException
      *             if the properties object was null.
      */
-    protected static DiscreteGenerator createOperationGenerator(final Properties p) {
+    protected static DiscreteGenerator<String> createOperationGenerator(final Properties p) {
         if (p == null) {
             throw new IllegalArgumentException("Properties object cannot be null");
         }
@@ -849,7 +927,7 @@ public class CoreWorkload extends Workload {
         final double readmodifywriteproportion = Double.parseDouble(
                 p.getProperty(READMODIFYWRITE_PROPORTION_PROPERTY, READMODIFYWRITE_PROPORTION_PROPERTY_DEFAULT));
 
-        final DiscreteGenerator operationchooser = new DiscreteGenerator();
+        final DiscreteGenerator<String> operationchooser = new DiscreteGenerator<>();
         if (readproportion > 0) {
             operationchooser.addValue(readproportion, "READ");
         }
@@ -872,18 +950,30 @@ public class CoreWorkload extends Workload {
         return operationchooser;
     }
 
+    protected DiscreteGenerator<Integer> createTableGenerator(final Properties p) {
+        if (p == null) {
+            throw new IllegalArgumentException("Properties object cannot be null");
+        }
+        String[] strs = p.getProperty(TABLE_OPERATION_PORTION, TABLE_COUNT_PROPERTY_DEFAULT).split(",");
+        if (strs.length != tablecount) {
+            System.err.println(
+                    "Illegal configuration of " + TABLE_OPERATION_PORTION + ". Expecting " + tablecount + " tables.");
+            System.exit(-1);
+        }
+
+        DiscreteGenerator<Integer> tablechooser = new DiscreteGenerator<>();
+        for (int i = 0; i < tablecount; i++) {
+            double portion = Double.valueOf(strs[i]);
+            if (portion > 0) {
+                tablechooser.addValue(portion, i);
+            }
+        }
+        return tablechooser;
+    }
+
     @Override
     public Object initThread(Properties p, int mythreadid, int threadcount) throws WorkloadException {
-        return new ThreadState(threadcount, mythreadid);
+        return null;
     }
 
-    private static class ThreadState {
-        final int threadcount;
-        final int threadid;
-
-        public ThreadState(int threadcount, int threadid) {
-            this.threadcount = threadcount;
-            this.threadid = threadid;
-        }
-    }
 }
