@@ -444,7 +444,7 @@ public class CoreWorkload extends Workload {
         recordcount = Long.parseLong(p.getProperty(Client.RECORD_COUNT_PROPERTY, Client.DEFAULT_RECORD_COUNT));
 
         tablerecordcount = new long[tablecount];
-        String[] strs = p.getProperty(TABLE_RECORD_PORTION).split(",");
+        String[] strs = p.getProperty(TABLE_RECORD_PORTION, TABLE_RECORD_PORTION_DEFAULT).split(",");
         if (tablecount != strs.length) {
             System.err.println("Illegal value of " + TABLE_RECORD_PORTION + ". Expecting " + tablecount + " tables.");
             System.exit(-1);
