@@ -393,8 +393,6 @@ public class CoreWorkload extends Workload {
     protected int insertionRetryInterval;
     protected String[] tablenames;
 
-    protected NumberGenerator skgenerator;
-
     private Measurements measurements = Measurements.getMeasurements();
 
     protected static NumberGenerator getFieldLengthGenerator(Properties p) throws WorkloadException {
@@ -570,8 +568,6 @@ public class CoreWorkload extends Workload {
         insertionRetryLimit = Integer.parseInt(p.getProperty(INSERTION_RETRY_LIMIT, INSERTION_RETRY_LIMIT_DEFAULT));
         insertionRetryInterval =
                 Integer.parseInt(p.getProperty(INSERTION_RETRY_INTERVAL, INSERTION_RETRY_INTERVAL_DEFAULT));
-
-        skgenerator = new UniformLongGenerator(insertstart, insertstart + insertcount - 1);
     }
 
     protected String buildKeyName(long keynum) {
@@ -590,13 +586,13 @@ public class CoreWorkload extends Workload {
     /**
      * Builds a value for a randomly chosen field.
      */
-    private HashMap<String, ByteIterator> buildSingleValue(String key) {
+    private HashMap<String, ByteIterator> buildSingleValue(String key, int table, boolean insert) {
         HashMap<String, ByteIterator> value = new HashMap<>();
 
         String fieldkey = fieldnames.get(fieldchooser.nextValue().intValue());
         ByteIterator data;
         if (dataintegrity) {
-            data = new StringByteIterator(buildDeterministicValue(key, fieldkey));
+            data = new StringByteIterator(buildDeterministicValue(key, fieldkey, table, insert));
         } else {
             // fill with random data
             data = new RandomByteIterator(fieldlengthgenerator.nextValue().longValue());
@@ -609,13 +605,13 @@ public class CoreWorkload extends Workload {
     /**
      * Builds values for all fields.
      */
-    private HashMap<String, ByteIterator> buildValues(String key) {
+    private HashMap<String, ByteIterator> buildValues(String key, int table, boolean insert) {
         HashMap<String, ByteIterator> values = new HashMap<>();
 
         for (String fieldkey : fieldnames) {
             ByteIterator data;
             if (dataintegrity) {
-                data = new StringByteIterator(buildDeterministicValue(key, fieldkey));
+                data = new StringByteIterator(buildDeterministicValue(key, fieldkey, table, insert));
             } else {
                 // fill with random data
                 data = new RandomByteIterator(fieldlengthgenerator.nextValue().longValue());
@@ -628,7 +624,7 @@ public class CoreWorkload extends Workload {
     /**
      * Build a deterministic value given the key information.
      */
-    private String buildDeterministicValue(String key, String fieldkey) {
+    private String buildDeterministicValue(String key, String fieldkey, int table, boolean insert) {
         int size = fieldlengthgenerator.nextValue().intValue();
         StringBuilder sb = new StringBuilder(size);
         //sb.append(key);
@@ -636,8 +632,11 @@ public class CoreWorkload extends Workload {
         sb.append(fieldkey);
         sb.append(':');
 
-        long skey = skgenerator.nextValue().longValue();
-        String keynumStr = Long.toString(skey);
+        long skey = insert ? keysequence[table].lastValue().longValue() : nextKeynum(table);
+        if (!orderedinserts) {
+            skey = Utils.hash(skey);
+        }
+        String keynumStr = String.valueOf(skey);
         int padding = size - keynumStr.length() - sb.length();
         for (int i = 0; i < padding; i++) {
             sb.append('0');
@@ -668,7 +667,7 @@ public class CoreWorkload extends Workload {
         int numOfRetries = 0;
         long keynum = keysequence[currentTable].nextValue().longValue();
         String dbkey = buildKeyName(keynum);
-        HashMap<String, ByteIterator> values = buildValues(dbkey);
+        HashMap<String, ByteIterator> values = buildValues(dbkey, currentTable, true);
         do {
             status = db.insert(tablenames[currentTable], dbkey, values);
             if (null != status && status.isOk()) {
@@ -819,10 +818,10 @@ public class CoreWorkload extends Workload {
 
         if (writeallfields) {
             // new data for all the fields
-            values = buildValues(keyname);
+            values = buildValues(keyname, table, false);
         } else {
             // update a random field
-            values = buildSingleValue(keyname);
+            values = buildSingleValue(keyname, table, false);
         }
 
         // do the transaction
@@ -877,10 +876,10 @@ public class CoreWorkload extends Workload {
 
         if (writeallfields) {
             // new data for all the fields
-            values = buildValues(keyname);
+            values = buildValues(keyname, table, false);
         } else {
             // update a random field
-            values = buildSingleValue(keyname);
+            values = buildSingleValue(keyname, table, false);
         }
 
         db.update(tablenames[table], keyname, values);
@@ -893,7 +892,7 @@ public class CoreWorkload extends Workload {
         try {
             String dbkey = buildKeyName(keynum);
 
-            HashMap<String, ByteIterator> values = buildValues(dbkey);
+            HashMap<String, ByteIterator> values = buildValues(dbkey, table, false);
             db.insert(tablenames[table], dbkey, values);
         } finally {
             transactioninsertkeysequence[table].acknowledge(keynum);
